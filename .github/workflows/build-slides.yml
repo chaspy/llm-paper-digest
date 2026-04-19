@@ -1,0 +1,70 @@
+name: Build and Deploy Slides
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "slides/**"
+      - "summaries/**"
+      - "lists/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Marp CLI
+        run: npm install -g @marp-team/marp-cli
+      - name: Build HTML slides
+        run: |
+          mkdir -p dist/slides
+          for f in slides/*.md; do
+            [ -f "$f" ] || continue
+            name=$(basename "$f" .md)
+            marp "$f" -o "dist/slides/${name}.html"
+          done
+      - name: Generate index.html
+        run: |
+          cat > dist/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html lang="ja">
+          <head><meta charset="UTF-8"><title>LLM Paper Digest</title></head>
+          <body>
+          <h1>LLM Paper Digest</h1>
+          <ul id="slides-list"></ul>
+          <script>
+          fetch("slides/").then(r=>r.text()).then(html=>{
+            const links = [...html.matchAll(/href="([^"]+\.html)"/g)].map(m=>m[1]);
+            document.getElementById("slides-list").innerHTML = links.map(l=>`<li><a href="slides/${l}">${l.replace(".html","")}</a></li>`).join("");
+          }).catch(()=>{
+            document.getElementById("slides-list").innerHTML = "<li>スライドはまだありません</li>";
+          });
+          </script>
+          </body></html>
+          EOF
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
